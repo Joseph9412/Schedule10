@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>내 스케줄 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel" id="not_linked_notice" style="display:none;">
+    <p class="small-muted">이 계정은 아직 강사 프로필과 연결되어 있지 않습니다. 관리자에게 문의해주세요.</p>
+  </div>
+
+  <div id="portal_content" style="display:none;">
+    <div class="panel">
+      <h3 id="profile_title"></h3>
+      <div id="profile_holder"></div>
+    </div>
+
+    <div class="panel" style="margin-top:20px;">
+      <h3>내 주간 스케줄 (승인 완료 기준)</h3>
+      <span id="hour_chip" class="hour-chip" style="display:none;"></span>
+      <div id="grid_holder" class="grid-wrap" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="container-flex" style="margin-top:20px;">
+      <div class="panel panel-left">
+        <h3>휴가 / 병가 / 퇴사 신청</h3>
+        <div class="form-group">
+          <label>종류</label>
+          <select id="req_type"></select>
+        </div>
+        <div class="container-flex" style="gap:8px;">
+          <div class="form-group" style="flex:1;"><label>시작일</label><input type="date" id="req_start"></div>
+          <div class="form-group" style="flex:1;"><label>종료일</label><input type="date" id="req_end"></div>
+        </div>
+        <div class="form-group"><label>사유 (선택)</label><textarea id="req_reason" rows="2"></textarea></div>
+        <button class="btn btn-submit-block" onclick="submitLeaveRequest()">신청하기</button>
+        <p class="small-muted" style="margin-top:8px;">신청 후 관리자 승인이 완료되면 일정관리 캘린더에 반영됩니다.</p>
+      </div>
+      <div class="panel panel-right">
+        <h3>내 신청 이력</h3>
+        <div id="my_leaves_holder"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireTeacherRole();
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("portal");
+    const teacher = getTeachers().find(t => t.id === me.teacherId);
+    if (!teacher) {
+      document.getElementById("not_linked_notice").style.display = "block";
+      return;
+    }
+    document.getElementById("portal_content").style.display = "block";
+    document.getElementById("req_type").innerHTML = LEAVE_TYPES.map(t => `<option value="${t}">${t}</option>`).join("");
+    renderProfile(teacher);
+    renderTeacherGrid(teacher.id, document.getElementById("grid_holder"), document.getElementById("hour_chip"));
+    renderMyLeaves(teacher.id);
+  }
+
+  function renderProfile(t) {
+    document.getElementById("profile_title").textContent = `안녕하세요, ${t.name}님`;
+    document.getElementById("profile_holder").innerHTML = `
+      <div class="meta">🏠 ${escapeHtml(t.location || "미등록")}</div>
+      <div class="meta">☎ ${escapeHtml(t.phone || "미등록")}</div>
+      <div class="meta">${t.visa ? `<span class="visa-badge">${escapeHtml(t.visa)}</span>` : ""} 입사일: ${escapeHtml(t.hireDate || "미등록")}</div>
+    `;
+  }
+
+  function submitLeaveRequest() {
+    const type = document.getElementById("req_type").value;
+    const startDate = document.getElementById("req_start").value;
+    const endDate = document.getElementById("req_end").value || startDate;
+    const reason = document.getElementById("req_reason").value.trim();
+    if (!startDate) { alert("시작일을 입력해주세요."); return; }
+    if (endDate < startDate) { alert("종료일은 시작일보다 빠를 수 없습니다."); return; }
+
+    const teacher = getTeachers().find(t => t.id === me.teacherId);
+    const leaves = getLeaves();
+    leaves.push({
+      id: uid("lv"), teacherId: teacher.id, teacherName: teacher.name,
+      type, startDate, endDate, reason, status: "대기", createdAt: new Date().toISOString(), requestedBy: me.name
+    });
+    saveLeaves(leaves);
+    document.getElementById("req_start").value = ""; document.getElementById("req_end").value = ""; document.getElementById("req_reason").value = "";
+    renderMyLeaves(teacher.id);
+    alert("신청이 접수되었습니다. 관리자 승인을 기다려주세요.");
+  }
+
+  function renderMyLeaves(teacherId) {
+    const leaves = sortByUpcoming(getLeaves().filter(l => l.teacherId === teacherId), "startDate");
+    const holder = document.getElementById("my_leaves_holder");
+    if (leaves.length === 0) { holder.innerHTML = `<p class="small-muted">신청 이력이 없습니다.</p>`; return; }
+    holder.innerHTML = leaves.map(l => `
+      <div class="note-item">
+        <div class="note-head"><span><b>${escapeHtml(l.type)}</b></span>
+          <span class="${l.status === '승인' ? 'status-approved' : (l.status === '거절' ? '' : 'status-pending')}">${escapeHtml(l.status)}</span>
+        </div>
+        <div class="note-text">${escapeHtml(l.startDate)} ~ ${escapeHtml(l.endDate)}${l.reason ? " · " + escapeHtml(l.reason) : ""}</div>
+      </div>
+    `).join("");
+  }
+
+  init();
+</script>
+</body>
+</html>

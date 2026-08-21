@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>가입 회원 확인 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3>계정 직접 등록</h3>
+    <div class="container-flex" style="gap:10px; align-items:flex-end;">
+      <div class="form-group" style="flex:1; min-width:130px;"><label>이름</label><input id="new_name"></div>
+      <div class="form-group" style="flex:1; min-width:130px;"><label>비밀번호</label><input id="new_pw" type="password"></div>
+      <div class="form-group" style="flex:1; min-width:130px;">
+        <label>권한</label>
+        <select id="new_role"><option value="user">사원</option><option value="admin">관리자</option></select>
+      </div>
+      <button class="btn btn-primary" style="height:36px; margin-bottom:12px;" onclick="addUser()">등록</button>
+    </div>
+    <p class="small-muted" style="margin-top:-8px;">※ 로그인은 이름 + 비밀번호로 합니다. 강사 계정은 강사 리스트 페이지의 각 강사 수정 화면에서 등록해주세요.</p>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3>가입 회원 목록 (관리자 전용)</h3>
+    <div class="search-bar"><input type="text" id="search_box" placeholder="이름으로 검색..." oninput="renderList()"></div>
+    <label class="small-muted" style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
+      <input type="checkbox" id="show_deleted" onchange="renderList()"> 삭제된 계정도 표시
+    </label>
+    <table class="data-table">
+      <thead>
+        <tr><th style="width:50px;">번호</th><th>이름</th><th>권한</th><th>가입일시</th><th>상태</th><th style="width:100px;">관리</th></tr>
+      </thead>
+      <tbody id="user_tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  const me = requireAdmin();
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("users");
+    renderList();
+  }
+
+  function addUser() {
+    const name = document.getElementById("new_name").value.trim();
+    const pw = document.getElementById("new_pw").value;
+    const role = document.getElementById("new_role").value;
+    if (!name || !pw) { alert("이름, 비밀번호를 모두 입력해주세요."); return; }
+    const users = getUsers();
+    const id = makeUniqueId(name);
+    users.push({ id, pw, name, role, createdAt: new Date().toISOString() });
+    saveUsers(users);
+    document.getElementById("new_name").value = "";
+    document.getElementById("new_pw").value = "";
+    renderList();
+    alert("계정이 등록되었습니다.");
+  }
+
+  function deleteUser(id) {
+    if (id === me.id) { alert("본인 계정은 삭제할 수 없습니다."); return; }
+    if (!confirm("해당 계정을 삭제하시겠습니까? (복구 가능)")) return;
+    const users = getUsers();
+    const u = users.find(x => x.id === id);
+    u.deleted = true;
+    saveUsers(users);
+    renderList();
+  }
+  function restoreUser(id) {
+    const users = getUsers();
+    const u = users.find(x => x.id === id);
+    u.deleted = false;
+    saveUsers(users);
+    renderList();
+  }
+
+  function renderList() {
+    const query = document.getElementById("search_box").value;
+    const showDeleted = document.getElementById("show_deleted").checked;
+    let users = [...getUsers()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    if (!showDeleted) users = users.filter(u => !u.deleted);
+    users = users.filter(u => matchesQuery([u.name], query));
+
+    const roleLabel = { admin: "관리자", user: "사원", teacher: "Teacher" };
+    const tbody = document.getElementById("user_tbody");
+    if (users.length === 0) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="6">${query ? "검색 결과가 없습니다." : "표시할 계정이 없습니다."}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = users.map((u, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtml(u.name)}</td>
+        <td>${roleLabel[u.role] || u.role}</td>
+        <td>${fmtDate(u.createdAt)}</td>
+        <td>${u.deleted ? '<span style="color:#ef4444;font-weight:700;">삭제됨</span>' : '<span style="color:#10b981;font-weight:700;">활성</span>'}</td>
+        <td>${u.deleted
+          ? `<button class="btn btn-success btn-sm" onclick="restoreUser('${u.id}')">복구</button>`
+          : `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">삭제</button>`}</td>
+      </tr>
+    `).join("");
+  }
+
+  init();
+</script>
+</body>
+</html>

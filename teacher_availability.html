@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보강/대체 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3 id="av_title"></h3>
+    <p class="small-muted" style="margin-bottom:14px;">선택한 요일에 수업이 없는(빈 시간) 강사를 한눈에 확인하고, 바로 보강/대체 수업을 배정할 수 있습니다. 배정하면 즉시 <b>승인 완료</b> 스케줄로 등록되어 주간 출강표에 반영됩니다.</p>
+
+    <div class="container-flex" style="gap:10px; align-items:flex-end;">
+      <div class="form-group" style="min-width:160px;">
+        <label>요일</label>
+        <select id="day_select" onchange="renderAvailability()">
+          <option value="월요일">월요일</option>
+          <option value="화요일">화요일</option>
+          <option value="수요일">수요일</option>
+          <option value="목요일">목요일</option>
+          <option value="금요일">금요일</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1; min-width:200px;">
+        <div class="search-bar" style="margin-bottom:0;">
+          <input type="text" id="search_box" placeholder="강사 이름으로 검색..." oninput="renderAvailability()">
+        </div>
+      </div>
+    </div>
+
+    <div id="availability_holder" style="margin-top:14px;"></div>
+  </div>
+</div>
+
+<!-- 배정 모달 -->
+<div class="modal-bg" id="assignModal">
+  <div class="modal-box">
+    <h3>보강/대체 배정</h3>
+    <p class="small-muted" id="assign_teacher_line" style="margin-bottom:10px;"></p>
+    <div class="form-group">
+      <label>어린이집 / 유치원</label>
+      <select id="assign_daycare"></select>
+    </div>
+    <div class="form-group">
+      <label>요일</label>
+      <input type="text" id="assign_day" disabled style="background:#f1f5f9;">
+    </div>
+    <div class="container-flex" style="gap:10px;">
+      <div class="form-group" style="flex:1;"><label>시작 시간</label><input type="time" id="assign_start" step="600"></div>
+      <div class="form-group" style="flex:1;"><label>종료 시간</label><input type="time" id="assign_end" step="600"></div>
+    </div>
+    <div class="quick-duration" id="quick_duration_assign"></div>
+    <div class="form-group">
+      <label>참고사항 (선택)</label>
+      <textarea id="assign_memo" rows="2" placeholder="예: OOO 강사 병가로 인한 대체 수업"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAssignModal()">취소</button>
+      <button class="btn btn-primary" onclick="confirmAssign()">배정 (승인 완료로 등록)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  let assignTeacherId = null;
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("availability");
+    document.getElementById("av_title").textContent = siteLabel("headings.availability_title", DEFAULT_SITE_SETTINGS.headings.availability_title);
+    const todayIdx = new Date().getDay(); // 0=Sun..6=Sat
+    const map = { 1: "월요일", 2: "화요일", 3: "수요일", 4: "목요일", 5: "금요일" };
+    document.getElementById("day_select").value = map[todayIdx] || "월요일";
+    document.getElementById("assign_daycare").innerHTML = getDaycares().map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+    renderQuickDurationButtons();
+    renderAvailability();
+  }
+
+  function renderQuickDurationButtons() {
+    const presets = [["30분",30],["1시간",60],["1시간30분",90],["2시간",120],["3시간",180]];
+    document.getElementById("quick_duration_assign").innerHTML = presets.map(p =>
+      `<button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset(${p[1]})">+${p[0]}</button>`
+    ).join(" ");
+  }
+  function applyPreset(minutes) {
+    const startEl = document.getElementById("assign_start");
+    const endEl = document.getElementById("assign_end");
+    if (!startEl.value) { alert("시작 시간을 먼저 입력해주세요."); return; }
+    endEl.value = minutesToTime(timeToMinutes(startEl.value) + minutes);
+  }
+
+  /* 빈 시간 계산: 운영시간에서 예약된 구간을 뺀 나머지 */
+  function computeFreeIntervals(busy) {
+    const opStart = timeToMinutes(OPERATING_START), opEnd = timeToMinutes(OPERATING_END);
+    const sorted = [...busy].map(b => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) })).sort((a, b) => a.start - b.start);
+    const free = [];
+    let cursor = opStart;
+    sorted.forEach(b => {
+      if (b.start > cursor) free.push({ start: cursor, end: b.start });
+      cursor = Math.max(cursor, b.end);
+    });
+    if (cursor < opEnd) free.push({ start: cursor, end: opEnd });
+    return free;
+  }
+
+  function renderAvailability() {
+    const day = document.getElementById("day_select").value;
+    const query = document.getElementById("search_box").value;
+    let data = computeTeacherAvailability(day);
+    data = data.filter(d => matchesQuery([d.teacher.name], query));
+
+    const holder = document.getElementById("availability_holder");
+    if (data.length === 0) {
+      holder.innerHTML = `<p class="small-muted">${query ? "검색 결과가 없습니다." : "등록된 강사가 없습니다."}</p>`;
+      return;
+    }
+
+    holder.innerHTML = `<table class="data-table" style="text-align:left;">
+      <thead><tr><th style="width:140px;">강사</th><th>예약된 수업</th><th>빈 시간</th><th style="width:110px;">관리</th></tr></thead>
+      <tbody>
+        ${data.map(d => {
+          const busyHtml = d.busy.length
+            ? d.busy.map(b => `<span class="default-sched-chip" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;">${b.start}~${b.end} · ${escapeHtml(b.daycareName)}</span>`).join("")
+            : `<span class="small-muted">예약 없음 (하루 전체 공백)</span>`;
+          const free = computeFreeIntervals(d.busy);
+          const freeHtml = free.length
+            ? free.map(f => `<span class="default-sched-chip">${minutesToTime(f.start)}~${minutesToTime(f.end)}</span>`).join("")
+            : `<span class="small-muted">공백 없음 (하루 종일 예약됨)</span>`;
+          return `
+            <tr>
+              <td><b>${escapeHtml(d.teacher.name)}</b>${d.teacher.visa ? `<br><span class="visa-badge">${escapeHtml(d.teacher.visa)}</span>` : ""}</td>
+              <td>${busyHtml}</td>
+              <td>${freeHtml}</td>
+              <td><button class="btn btn-primary btn-sm" onclick="openAssignModal('${d.teacher.id}', '${escapeHtml(d.teacher.name)}')">배정</button></td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>`;
+  }
+
+  function openAssignModal(teacherId, teacherName) {
+    assignTeacherId = teacherId;
+    const day = document.getElementById("day_select").value;
+    document.getElementById("assign_teacher_line").textContent = `강사: ${teacherName} · ${day}`;
+    document.getElementById("assign_day").value = day;
+    document.getElementById("assign_start").value = "";
+    document.getElementById("assign_end").value = "";
+    document.getElementById("assign_memo").value = "";
+    document.getElementById("assignModal").classList.add("open");
+  }
+  function closeAssignModal() { assignTeacherId = null; document.getElementById("assignModal").classList.remove("open"); }
+
+  function confirmAssign() {
+    const daycareId = document.getElementById("assign_daycare").value;
+    const day = document.getElementById("assign_day").value;
+    const start = document.getElementById("assign_start").value;
+    const end = document.getElementById("assign_end").value;
+    const memo = document.getElementById("assign_memo").value.trim();
+
+    if (!daycareId) { alert("어린이집을 선택해주세요."); return; }
+    if (!start || !end) { alert("시작/종료 시간을 입력해주세요."); return; }
+    const startMin = timeToMinutes(start), endMin = timeToMinutes(end);
+    if (startMin < timeToMinutes(OPERATING_START) || endMin > timeToMinutes(OPERATING_END) || endMin <= startMin) {
+      alert(`운영 시간(${OPERATING_START} ~ ${OPERATING_END}) 범위 내에서, 종료 시간이 시작 시간보다 늦도록 입력해주세요.`);
+      return;
+    }
+    const conflict = findScheduleConflict(getSchedules(), [assignTeacherId], daycareId, day, startMin, endMin, null);
+    if (conflict) {
+      alert(conflict.type === "teacher" ? "해당 강사는 이 시간대에 이미 다른 수업이 있습니다." : "해당 어린이집은 이 시간대에 이미 다른 수업이 있습니다.");
+      return;
+    }
+
+    const teacher = getTeachers().find(t => t.id === assignTeacherId);
+    const daycare = getDaycares().find(d => d.id === daycareId);
+    const schedules = getSchedules();
+    schedules.push({
+      id: uid("sc"),
+      requesterId: me.id, requesterName: me.name,
+      teacherId: assignTeacherId, teacherName: teacher.name,
+      daycareId, daycareName: daycare.name,
+      day, start, end, memo: memo || "보강/대체 배정",
+      status: "승인",
+      createdAt: new Date().toISOString()
+    });
+    saveSchedules(schedules);
+    closeAssignModal();
+    renderAvailability();
+    alert("배정 완료! 승인 현황 페이지의 주간 출강표에 바로 반영됩니다.");
+  }
+
+  init();
+</script>
+</body>
+</html>

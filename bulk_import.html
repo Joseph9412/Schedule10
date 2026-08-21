@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통합 데이터 등록 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3 id="bi_title"></h3>
+    <p class="small-muted" style="margin-bottom:10px;">
+      운영 시트에 있는 데이터를 그대로 복사해서 붙여넣으면, <b>담당자 · 어린이집 · 강사 · 정기 수업시간</b>이 자동으로 등록되고,
+      시간이 충돌하지 않는 건은 <b>승인 완료 스케줄</b>로도 바로 등록됩니다. (충돌하는 건은 정기 수업시간만 등록되고, 실제 배정은 건너뜁니다 — 아래 결과에서 확인 가능)
+    </p>
+
+    <div class="settings-section" style="background:#f8fafc;">
+      <h4>컬럼 순서 (탭으로 구분, 엑셀에서 그대로 복사해 붙여넣기)</h4>
+      <p class="small-muted" style="line-height:1.8;">
+        <b>1.담당자</b> · 2.지역 · 3.어린이집명 · 4.기존/신규 · 5.수업시작일 · 6.수업요일 · 7.시작시간 · 8.타임수(1타임=30분) · 9.연령(만) · 10.레벨 · 11.진행 레벨 · 12.강사명
+      </p>
+      <p class="small-muted">
+        · 담당자가 "이름/이름" 형태이면 두 명이 함께 관리하는 것으로 보고 그대로 하나의 담당자로 등록합니다.<br>
+        · 수업요일에 "화,목"처럼 여러 요일을 콤마로 넣으면 각 요일마다 동일한 시작시간/타임수로 등록됩니다.<br>
+        · 담당자/어린이집/강사 이름이 이미 등록되어 있으면 그 항목을 그대로 사용하고, 없으면 새로 만듭니다.
+      </p>
+    </div>
+
+    <div class="form-group">
+      <label>데이터 붙여넣기</label>
+      <textarea id="bulk_text" rows="8" style="font-family:'Consolas',monospace; font-size:12.5px;"
+        placeholder="신성경/박성범	강남구	개포유치원	기존	2026-03-02	화,목	14:00	2	4,5	D	D	Danny_대니"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="runImport()">일괄 등록 실행</button>
+
+    <div id="result_holder" style="margin-top:20px;"></div>
+  </div>
+</div>
+
+<script>
+  const me = requireAdmin();
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("bulkimport");
+    document.getElementById("bi_title").textContent = siteLabel("headings.bulkimport_title", DEFAULT_SITE_SETTINGS.headings.bulkimport_title);
+  }
+
+  function findOrCreateManager(name, managers) {
+    if (!name) return "";
+    let m = managers.find(mm => mm.name === name);
+    if (!m) { m = { id: uid("m"), name, phone: "", memo: "", createdAt: new Date().toISOString() }; managers.push(m); }
+    return m.id;
+  }
+
+  function findOrCreateTeacher(name, teachers) {
+    if (!name) return null;
+    let t = teachers.find(tt => tt.name === name);
+    if (!t) {
+      t = { id: uid("t"), name, location: "", phone: "", visa: "", hireDate: "", resignDate: "", status: "재직", photo: "" };
+      teachers.push(t);
+    }
+    return t;
+  }
+
+  function findOrCreateDaycare(fullName, managerId, daycares) {
+    let d = daycares.find(dd => dd.name === fullName);
+    if (!d) {
+      d = { id: uid("d"), name: fullName, managerId: managerId || "", defaultSchedules: [] };
+      daycares.push(d);
+    } else if (managerId) {
+      d.managerId = managerId;
+    }
+    if (!d.defaultSchedules) d.defaultSchedules = [];
+    return d;
+  }
+
+  function addDefaultScheduleIfNew(daycare, day, start, sessions) {
+    const exists = daycare.defaultSchedules.some(s => s.day === day && s.start === start);
+    if (!exists) daycare.defaultSchedules.push({ day, start, sessions });
+  }
+
+  function runImport() {
+    const text = document.getElementById("bulk_text").value;
+    const rows = parseBulkRows(text);
+    if (rows.length === 0) { alert("붙여넣은 내용이 없습니다."); return; }
+
+    const managers = getManagers();
+    const teachers = getTeachers();
+    const daycares = getDaycares();
+    const schedules = getSchedules();
+    const notes = getNotes();
+
+    const results = [];
+    let cManagers = 0, cDaycares = 0, cTeachers = 0, cSchedules = 0, cSkippedConflict = 0, cErrors = 0;
+    const managersBefore = managers.map(m => m.id);
+    const daycaresBefore = daycares.map(d => d.id);
+    const teachersBefore = teachers.map(t => t.id);
+
+    rows.forEach((cols, rowIdx) => {
+      const managerName = (cols[0] || "").trim();
+      const region = (cols[1] || "").trim();
+      const dcName = (cols[2] || "").trim();
+      const existFlag = (cols[3] || "").trim();
+      const startDate = (cols[4] || "").trim();
+      const dayRaw = (cols[5] || "").trim();
+      const startTime = (cols[6] || "").trim();
+      const sessions = parseInt(cols[7], 10) || 1;
+      const age = (cols[8] || "").trim();
+      const level = (cols[9] || "").trim();
+      const progressLevel = (cols[10] || "").trim();
+      const teacherName = (cols[11] || "").trim();
+
+      if (!dcName) { results.push({ row: rowIdx + 1, status: "error", msg: "어린이집명이 비어 있어 건너뜀" }); cErrors++; return; }
+      if (!/^\d{1,2}:\d{2}$/.test(startTime)) { results.push({ row: rowIdx + 1, status: "error", msg: `시작시간 형식이 올바르지 않아 정기시간/스케줄 등록을 건너뜀 (${startTime || "비어있음"})` }); cErrors++; return; }
+
+      const fullName = dcName.includes("_") ? dcName : (region ? `${region}_${dcName}` : dcName);
+      const managerId = findOrCreateManager(managerName, managers);
+      const daycare = findOrCreateDaycare(fullName, managerId, daycares);
+      const teacher = teacherName ? findOrCreateTeacher(teacherName, teachers) : null;
+
+      const days = parseDayList(dayRaw);
+      if (days.length === 0) { results.push({ row: rowIdx + 1, status: "error", msg: `수업요일을 인식하지 못함 (${dayRaw || "비어있음"}) — 정기시간 등록만 생략`}); cErrors++; return; }
+
+      const memoLines = [];
+      if (existFlag) memoLines.push(`기존/신규: ${existFlag}`);
+      if (startDate) memoLines.push(`수업시작일: ${startDate}`);
+      if (age) memoLines.push(`연령(만): ${age}`);
+      if (level) memoLines.push(`레벨: ${level}`);
+      if (progressLevel) memoLines.push(`진행 레벨: ${progressLevel}`);
+      const memo = memoLines.join(" / ");
+
+      days.forEach(day => {
+        addDefaultScheduleIfNew(daycare, day, startTime, sessions);
+
+        if (!teacher) { results.push({ row: rowIdx + 1, status: "partial", msg: `${day} 정기시간은 등록됨 (강사명이 없어 실제 배정은 생략)` }); return; }
+
+        const endTime = sessionsToEnd(startTime, sessions);
+        const startMin = timeToMinutes(startTime), endMin = timeToMinutes(endTime);
+        const conflict = findScheduleConflict(schedules, [teacher.id], daycare.id, day, startMin, endMin, null);
+        if (conflict) {
+          results.push({ row: rowIdx + 1, status: "conflict", msg: `${day} ${startTime}~${endTime} — 기존 스케줄과 충돌하여 배정 생략 (정기시간만 등록됨)` });
+          cSkippedConflict++;
+          return;
+        }
+        schedules.push({
+          id: uid("sc"), requesterId: me.id, requesterName: me.name,
+          teacherId: teacher.id, teacherName: teacher.name,
+          daycareId: daycare.id, daycareName: daycare.name,
+          day, start: startTime, end: endTime, memo,
+          status: "승인", createdAt: new Date().toISOString()
+        });
+        cSchedules++;
+        results.push({ row: rowIdx + 1, status: "ok", msg: `${day} ${startTime}~${endTime} · ${escapeHtml(daycare.name)} · ${escapeHtml(teacher.name)} 배정 완료` });
+      });
+
+      if (memo) {
+        if (!notes[daycare.id]) notes[daycare.id] = [];
+        notes[daycare.id].push({ author: me.name, text: `[통합 데이터 등록] ${memo}${teacherName ? " / 강사: " + teacherName : ""}`, date: new Date().toISOString() });
+      }
+    });
+
+    cManagers = managers.length - managersBefore.length;
+    cDaycares = daycares.length - daycaresBefore.length;
+    cTeachers = teachers.length - teachersBefore.length;
+
+    saveManagers(managers);
+    saveTeachers(teachers);
+    saveDaycares(daycares);
+    saveSchedules(schedules);
+    saveNotes(notes);
+
+    renderResults({ rows: rows.length, cManagers, cDaycares, cTeachers, cSchedules, cSkippedConflict, cErrors, results });
+    renderHeadBar("bulkimport");
+  }
+
+  function renderResults(r) {
+    const statusIcon = { ok: "✅", conflict: "⚠️", partial: "ℹ️", error: "❌" };
+    document.getElementById("result_holder").innerHTML = `
+      <div class="settings-section">
+        <h4>처리 결과</h4>
+        <p>총 ${r.rows}행 처리 · 신규 담당자 ${r.cManagers}명 · 신규 어린이집 ${r.cDaycares}곳 · 신규 강사 ${r.cTeachers}명 ·
+           승인 스케줄 ${r.cSchedules}건 생성 · 충돌로 생략 ${r.cSkippedConflict}건 · 오류 ${r.cErrors}건</p>
+      </div>
+      <table class="data-table" style="text-align:left;">
+        <thead><tr><th style="width:60px;">행</th><th style="width:60px;">상태</th><th>내용</th></tr></thead>
+        <tbody>
+          ${r.results.map(x => `<tr><td>${x.row}</td><td>${statusIcon[x.status] || ""}</td><td>${escapeHtml(x.msg)}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  init();
+</script>
+</body>
+</html>

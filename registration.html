@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수업 요청 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="container-flex">
+    <div class="panel panel-left">
+      <h3 id="h_form"></h3>
+      <div class="form-group">
+        <label>어린이집 / 유치원</label>
+        <select id="select_daycare" onchange="onDaycareChange()"></select>
+      </div>
+      <p class="small-muted" id="default_sched_hint" style="margin:-6px 0 10px;"></p>
+      <div class="form-group">
+        <label>원어민 강사</label>
+        <select id="select_teacher"></select>
+      </div>
+      <div class="form-group">
+        <label>요일</label>
+        <select id="select_day">
+          <option value="월요일">월요일</option>
+          <option value="화요일">화요일</option>
+          <option value="수요일">수요일</option>
+          <option value="목요일">목요일</option>
+          <option value="금요일">금요일</option>
+        </select>
+      </div>
+      <div class="container-flex" style="gap:10px;">
+        <div class="form-group" style="flex:1;">
+          <label>시작 시간</label>
+          <input type="time" id="select_start" step="600" value="09:00">
+        </div>
+        <div class="form-group" style="flex:1;">
+          <label>종료 시간</label>
+          <input type="time" id="select_end" step="600" value="10:00">
+        </div>
+      </div>
+      <div class="quick-duration" id="quick_duration_new"></div>
+      <p class="small-muted" id="duration_hint_new" style="margin:4px 0 10px;"></p>
+
+      <div class="form-group">
+        <label>참고사항 (선택)</label>
+        <textarea id="select_memo" rows="2" placeholder="필요 시 간단히 메모"></textarea>
+      </div>
+
+      <button class="btn btn-submit-block" onclick="submitRequest()">수업 요청하기</button>
+      <p class="small-muted" style="margin-top:8px;">같은 강사 또는 같은 어린이집이 동일 요일·시간대에 이미 예약된 경우 요청이 자동으로 차단됩니다. 운영 시간: <span id="op_hours_label"></span> (10분 단위로 자유롭게 입력 가능)</p>
+    </div>
+
+    <div class="panel panel-right">
+      <h3>담당자별 대기 현황</h3>
+      <p class="small-muted" style="margin-bottom:10px;">아래 요약을 클릭하면 해당 담당자의 대기 목록으로 이동합니다. 승인된 스케줄과 주간 출강표는 <a href="approved.html" style="color:#2563eb; font-weight:700;">승인 현황</a> 페이지에서 확인하세요.</p>
+      <div id="manager_summary"></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3 id="h_list"></h3>
+    <div class="search-bar">
+      <input type="text" id="search_box" placeholder="어린이집, 강사, 담당자, 요청자, 요일로 검색..." oninput="renderGroups()">
+    </div>
+    <div id="pending_groups"></div>
+  </div>
+</div>
+
+<!-- 관리자 인라인 수정 모달 -->
+<div class="modal-bg" id="editModal">
+  <div class="modal-box">
+    <h3>요청 내용 수정</h3>
+    <div class="form-group">
+      <label>어린이집 / 유치원</label>
+      <select id="edit_daycare"></select>
+    </div>
+    <div class="form-group">
+      <label>원어민 강사</label>
+      <select id="edit_teacher"></select>
+    </div>
+    <div class="form-group">
+      <label>요일</label>
+      <select id="edit_day">
+        <option value="월요일">월요일</option>
+        <option value="화요일">화요일</option>
+        <option value="수요일">수요일</option>
+        <option value="목요일">목요일</option>
+        <option value="금요일">금요일</option>
+      </select>
+    </div>
+    <div class="container-flex" style="gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>시작 시간</label>
+        <input type="time" id="edit_start" step="600">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>종료 시간</label>
+        <input type="time" id="edit_end" step="600">
+      </div>
+    </div>
+    <div class="quick-duration" id="quick_duration_edit"></div>
+    <div class="form-group">
+      <label>참고사항 (선택)</label>
+      <textarea id="edit_memo" rows="2"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeEditModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  let editingId = null;
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("registration");
+    document.getElementById("h_form").textContent = siteLabel("headings.registration_form", "수업 요청");
+    document.getElementById("h_list").textContent = siteLabel("headings.registration_list", "수업 요청 현황 (대기 중 · 담당자별)");
+    refreshFormSelectors();
+    renderQuickDurationButtons("quick_duration_new", "select_start", "select_end");
+    renderQuickDurationButtons("quick_duration_edit", "edit_start", "edit_end");
+    ["select_start","select_end"].forEach(id => document.getElementById(id).addEventListener("change", updateDurationHint));
+    updateDurationHint();
+    document.getElementById("op_hours_label").textContent = `${OPERATING_START} ~ ${OPERATING_END}`;
+    onDaycareChange();
+    renderSummary();
+    renderGroups();
+  }
+
+  function renderQuickDurationButtons(holderId, startId, endId) {
+    const presets = [["30분",30],["1시간",60],["1시간30분",90],["2시간",120],["3시간",180]];
+    const holder = document.getElementById(holderId);
+    holder.innerHTML = presets.map(p => `<button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset('${startId}','${endId}',${p[1]})">+${p[0]}</button>`).join(" ");
+  }
+  function applyPreset(startId, endId, minutes) {
+    const startEl = document.getElementById(startId);
+    const endEl = document.getElementById(endId);
+    if (!startEl.value) { alert("시작 시간을 먼저 입력해주세요."); return; }
+    const startMin = timeToMinutes(startEl.value);
+    endEl.value = minutesToTime(startMin + minutes);
+    if (startId === "select_start") updateDurationHint();
+  }
+  function updateDurationHint() {
+    const s = document.getElementById("select_start").value;
+    const e = document.getElementById("select_end").value;
+    const hint = document.getElementById("duration_hint_new");
+    hint.textContent = (s && e && timeToMinutes(e) > timeToMinutes(s)) ? `수업 시간: ${fmtDuration(timeToMinutes(s), timeToMinutes(e))}` : "";
+  }
+
+  function refreshFormSelectors() {
+    const teachers = getTeachers();
+    const daycares = getDaycares();
+    const tOpts = teachers.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+    const dOpts = daycares.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+
+    document.getElementById("select_teacher").innerHTML = tOpts || `<option value="">등록된 강사 없음</option>`;
+    document.getElementById("select_daycare").innerHTML = dOpts || `<option value="">등록된 기관 없음</option>`;
+
+    document.getElementById("edit_teacher").innerHTML = tOpts;
+    document.getElementById("edit_daycare").innerHTML = dOpts;
+  }
+
+  /* 어린이집 선택 시, 등록된 정기 수업시간이 있으면 요일/시간 자동 채움 */
+  function onDaycareChange() {
+    const daycareId = document.getElementById("select_daycare").value;
+    const daycare = getDaycares().find(d => d.id === daycareId);
+    const hint = document.getElementById("default_sched_hint");
+    if (!daycare || !daycare.defaultSchedules || daycare.defaultSchedules.length === 0) {
+      hint.textContent = "";
+      return;
+    }
+    const first = daycare.defaultSchedules[0];
+    document.getElementById("select_day").value = first.day;
+    document.getElementById("select_start").value = first.start;
+    document.getElementById("select_end").value = sessionsToEnd(first.start, first.sessions);
+    updateDurationHint();
+    const list = daycare.defaultSchedules.map(defaultSchedLabel).join(", ");
+    hint.textContent = `📌 등록된 정기 수업시간: ${list} (자동 입력됨, 필요시 수정 가능 · 어린이집 리스트에서 관리)`;
+  }
+
+  /* ---------- 요청 등록 ---------- */
+  function withinBounds(startMin, endMin) {
+    return startMin >= timeToMinutes(OPERATING_START) && endMin <= timeToMinutes(OPERATING_END) && endMin > startMin;
+  }
+
+  function submitRequest() {
+    const daycareId = document.getElementById("select_daycare").value;
+    const teacherId = document.getElementById("select_teacher").value;
+    const day = document.getElementById("select_day").value;
+    const start = document.getElementById("select_start").value;
+    const end = document.getElementById("select_end").value;
+    const memo = document.getElementById("select_memo").value.trim();
+
+    if (!daycareId || !teacherId) { alert("어린이집과 강사를 모두 선택해주세요."); return; }
+    if (!start || !end) { alert("시작 시간과 종료 시간을 모두 입력해주세요."); return; }
+
+    const startMin = timeToMinutes(start), endMin = timeToMinutes(end);
+    if (!withinBounds(startMin, endMin)) {
+      alert(`선택하신 시간대가 운영 시간(${OPERATING_START} ~ ${OPERATING_END})을 벗어났거나 종료 시간이 시작 시간보다 빠릅니다.`);
+      return;
+    }
+
+    const teacher = getTeachers().find(t => t.id === teacherId);
+    const daycare = getDaycares().find(d => d.id === daycareId);
+
+    const conflict = findScheduleConflict(getSchedules(), [teacherId], daycareId, day, startMin, endMin, null);
+    if (conflict) {
+      if (conflict.type === "teacher") {
+        alert(`선택한 강사는 ${day} 해당 시간대(${conflict.entry.start}~${conflict.entry.end})에 이미 다른 수업이 예약되어 있습니다.`);
+      } else {
+        alert(`선택한 어린이집(${daycare.name})은 ${day} 해당 시간대에 이미 다른 수업이 예약되어 있습니다.`);
+      }
+      return;
+    }
+
+    const schedules = getSchedules();
+    schedules.push({
+      id: uid("sc"),
+      requesterId: me.id,
+      requesterName: me.name,
+      teacherId, teacherName: teacher.name,
+      daycareId, daycareName: daycare.name,
+      day, start, end, memo,
+      status: "대기",
+      createdAt: new Date().toISOString()
+    });
+    saveSchedules(schedules);
+    renderSummary(); renderGroups(); renderHeadBar("registration");
+    alert("수업 요청이 등록되었습니다. 관리자 승인을 기다려주세요.");
+  }
+
+  /* ---------- 승인 (승인 현황 페이지로 이동, 이 목록에서는 사라짐) ---------- */
+  function approveSchedule(id) {
+    const schedules = getSchedules();
+    const target = schedules.find(s => s.id === id);
+    const conflict = findScheduleConflict(schedules, [target.teacherId], target.daycareId, target.day, timeToMinutes(target.start), timeToMinutes(target.end), id);
+    if (conflict) { alert("동일 시간대에 이미 승인된 다른 스케줄과 충돌하여 승인할 수 없습니다."); return; }
+    target.status = "승인";
+    saveSchedules(schedules);
+    renderSummary(); renderGroups(); renderHeadBar("registration");
+    alert("승인되었습니다. '승인 현황' 페이지에서 확인할 수 있습니다.");
+  }
+
+  function deleteSchedule(id) {
+    if (!confirm("해당 요청 건을 삭제하시겠습니까?")) return;
+    saveSchedules(getSchedules().filter(s => s.id !== id));
+    renderSummary(); renderGroups(); renderHeadBar("registration");
+  }
+
+  /* ---------- 관리자 인라인 수정 ---------- */
+  function openEditModal(id) {
+    const s = getSchedules().find(x => x.id === id);
+    if (!s) return;
+    editingId = id;
+    document.getElementById("edit_daycare").value = s.daycareId;
+    document.getElementById("edit_teacher").value = s.teacherId;
+    document.getElementById("edit_day").value = s.day;
+    document.getElementById("edit_start").value = s.start;
+    document.getElementById("edit_end").value = s.end;
+    document.getElementById("edit_memo").value = s.memo || "";
+    document.getElementById("editModal").classList.add("open");
+  }
+  function closeEditModal() { editingId = null; document.getElementById("editModal").classList.remove("open"); }
+
+  function saveEdit() {
+    const daycareId = document.getElementById("edit_daycare").value;
+    const teacherId = document.getElementById("edit_teacher").value;
+    const day = document.getElementById("edit_day").value;
+    const start = document.getElementById("edit_start").value;
+    const end = document.getElementById("edit_end").value;
+    const memo = document.getElementById("edit_memo").value.trim();
+
+    const startMin = timeToMinutes(start), endMin = timeToMinutes(end);
+    if (!withinBounds(startMin, endMin)) {
+      alert(`선택하신 시간대가 운영 시간(${OPERATING_START} ~ ${OPERATING_END})을 벗어났거나 종료 시간이 시작 시간보다 빠릅니다.`);
+      return;
+    }
+
+    const conflict = findScheduleConflict(getSchedules(), [teacherId], daycareId, day, startMin, endMin, editingId);
+    if (conflict) { alert("수정하려는 시간대가 다른 스케줄과 충돌합니다."); return; }
+
+    const schedules = getSchedules();
+    const target = schedules.find(s => s.id === editingId);
+    const teacher = getTeachers().find(t => t.id === teacherId);
+    const daycare = getDaycares().find(d => d.id === daycareId);
+    Object.assign(target, {
+      daycareId, daycareName: daycare.name,
+      teacherId, teacherName: teacher.name,
+      day, start, end, memo
+    });
+    saveSchedules(schedules);
+    closeEditModal();
+    renderSummary(); renderGroups();
+  }
+
+  /* ---------- 담당자별 요약 (우측 패널) ---------- */
+  function renderSummary() {
+    const pending = getSchedules().filter(s => s.status === "대기");
+    const groups = groupSchedulesByManager(pending);
+    const holder = document.getElementById("manager_summary");
+    const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+    if (keys.length === 0) {
+      holder.innerHTML = `<p class="small-muted">대기 중인 요청이 없습니다.</p>`;
+      return;
+    }
+    holder.innerHTML = `<div class="mgr-chip-wrap">` + keys.map(k =>
+      `<a href="#mgr_${encodeURIComponent(k)}" class="mgr-chip">${escapeHtml(k)} <span class="badge">${groups[k].length}</span></a>`
+    ).join("") + `</div>`;
+  }
+
+  /* ---------- 대기 목록 (담당자별 그룹 + 검색) ---------- */
+  function renderGroups() {
+    const query = document.getElementById("search_box") ? document.getElementById("search_box").value : "";
+    let pending = [...getSchedules()].filter(s => s.status === "대기").sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    const daycareMgr = {};
+    getDaycares().forEach(d => daycareMgr[d.id] = getManagerName(d.managerId));
+    pending = pending.filter(s => matchesQuery(
+      [s.daycareName, s.teacherName, s.requesterName, s.day, daycareMgr[s.daycareId], s.memo], query
+    ));
+
+    const groups = groupSchedulesByManager(pending);
+    const holder = document.getElementById("pending_groups");
+    const keys = Object.keys(groups).sort();
+
+    if (keys.length === 0) {
+      holder.innerHTML = `<p class="small-muted">${query ? "검색 결과가 없습니다." : "등록된 대기 요청이 없습니다."}</p>`;
+      return;
+    }
+
+    holder.innerHTML = keys.map(mgr => {
+      const rows = groups[mgr];
+      return `
+        <details class="mgr-group" open id="mgr_${encodeURIComponent(mgr)}">
+          <summary>담당자: ${escapeHtml(mgr)} <span class="badge">${rows.length}</span></summary>
+          <table class="data-table" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>요청자</th><th>어린이집 / 기관</th><th>배정 강사</th><th>일정</th><th>참고사항</th><th style="width:190px;">관리</th>
+              </tr>
+            </thead>
+            <tbody>${rows.map(rowHtml).join("")}</tbody>
+          </table>
+        </details>
+      `;
+    }).join("");
+  }
+
+  function rowHtml(s) {
+    const isAdmin = me.role === "admin";
+    const isOwner = s.requesterId === me.id;
+    let actionBtns;
+    if (isAdmin) {
+      actionBtns = `
+        <button onclick="approveSchedule('${s.id}')" class="btn btn-success">승인</button>
+        <button onclick="openEditModal('${s.id}')" class="btn btn-ghost btn-sm">수정</button>
+        <button onclick="deleteSchedule('${s.id}')" class="btn btn-danger">삭제</button>
+      `;
+    } else if (isOwner) {
+      actionBtns = `<button onclick="deleteSchedule('${s.id}')" class="btn btn-danger">요청 취소</button>`;
+    } else {
+      actionBtns = "-";
+    }
+    return `
+      <tr>
+        <td>${escapeHtml(s.requesterName)}</td>
+        <td>${escapeHtml(s.daycareName)}</td>
+        <td><b>${escapeHtml(s.teacherName)}</b></td>
+        <td>${s.day} (${s.start}~${s.end}, ${fmtDuration(timeToMinutes(s.start), timeToMinutes(s.end))})</td>
+        <td style="text-align:left; max-width:220px; white-space:pre-wrap;">${escapeHtml(s.memo || "-")}</td>
+        <td>${actionBtns}</td>
+      </tr>
+    `;
+  }
+
+  init();
+</script>
+</body>
+</html>

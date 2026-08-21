@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>담당자 상세 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <a href="managers.html" class="back-link">← 담당자 리스트로 돌아가기</a>
+    <div id="profile_holder"></div>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3>담당 어린이집 / 유치원</h3>
+    <div id="dc_holder" class="dc-list" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3>대기 중인 요청</h3>
+    <div id="pending_holder"></div>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3>승인 완료 스케줄</h3>
+    <div id="approved_holder"></div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  const params = new URLSearchParams(location.search);
+  const managerId = params.get("id");
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("managers");
+    const manager = getManagers().find(m => m.id === managerId);
+    if (!manager) {
+      document.getElementById("profile_holder").innerHTML = `<p class="small-muted">담당자를 찾을 수 없습니다.</p>`;
+      return;
+    }
+    renderProfile(manager);
+    const myDaycares = getDaycares().filter(d => d.managerId === managerId);
+    renderDaycares(myDaycares);
+    const daycareIds = myDaycares.map(d => d.id);
+    renderPending(daycareIds);
+    renderApproved(daycareIds);
+  }
+
+  function renderProfile(m) {
+    document.getElementById("profile_holder").innerHTML = `
+      <h3 style="margin-bottom:8px;">👤 ${escapeHtml(m.name)}</h3>
+      <div class="meta">☎ ${escapeHtml(m.phone || "미등록")}</div>
+      <div class="meta">${escapeHtml(m.memo || "")}</div>
+    `;
+  }
+
+  function renderDaycares(list) {
+    const holder = document.getElementById("dc_holder");
+    if (list.length === 0) { holder.innerHTML = `<p class="small-muted">배정된 어린이집이 없습니다.</p>`; return; }
+    holder.innerHTML = list.map(d => {
+      const schedChips = (d.defaultSchedules || []).map(s => `<span class="default-sched-chip">${defaultSchedLabel(s)}</span>`).join("");
+      return `
+        <div class="dc-row">
+          <div>
+            <a class="dc-name" href="daycare_notes.html?id=${encodeURIComponent(d.id)}">${escapeHtml(d.name)}</a>
+            <div style="margin-top:6px;">${schedChips}</div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderPending(daycareIds) {
+    const pending = getSchedules().filter(s => daycareIds.includes(s.daycareId) && s.status === "대기");
+    const holder = document.getElementById("pending_holder");
+    if (pending.length === 0) { holder.innerHTML = `<p class="small-muted">대기 중인 요청이 없습니다.</p>`; return; }
+    holder.innerHTML = `<table class="data-table"><thead><tr><th>어린이집</th><th>배정 강사</th><th>일정</th><th>요청자</th></tr></thead><tbody>` +
+      pending.map(s => `<tr><td>${escapeHtml(s.daycareName)}</td><td>${escapeHtml(s.teacherName)}</td><td>${s.day} ${s.start}~${s.end}</td><td>${escapeHtml(s.requesterName)}</td></tr>`).join("") +
+      `</tbody></table>`;
+  }
+
+  function renderApproved(daycareIds) {
+    const approved = getSchedules().filter(s => daycareIds.includes(s.daycareId) && s.status === "승인").sort((a,b) => (a.day+a.start).localeCompare(b.day+b.start));
+    const holder = document.getElementById("approved_holder");
+    if (approved.length === 0) { holder.innerHTML = `<p class="small-muted">승인된 스케줄이 없습니다.</p>`; return; }
+    holder.innerHTML = `<table class="data-table"><thead><tr><th>어린이집</th><th>배정 강사</th><th>일정</th></tr></thead><tbody>` +
+      approved.map(s => `<tr><td>${escapeHtml(s.daycareName)}</td><td>${escapeHtml(s.teacherName)}</td><td>${s.day} ${s.start}~${s.end}</td></tr>`).join("") +
+      `</tbody></table>`;
+  }
+
+  init();
+</script>
+</body>
+</html>

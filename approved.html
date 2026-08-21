@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>승인 현황 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3 id="h_grid"></h3>
+    <div class="teacher-select-bar">
+      <select id="grid_teacher_select" onchange="renderGrid()"></select>
+      <span id="hour_chip" class="hour-chip" style="display:none;"></span>
+    </div>
+    <div id="grid_holder" class="grid-wrap"></div>
+  </div>
+
+  <div class="panel" style="margin-top:20px;">
+    <h3 id="h_list"></h3>
+    <div class="search-bar">
+      <input type="text" id="search_box" placeholder="어린이집, 강사, 담당자, 요청자, 요일로 검색..." oninput="renderGroups()">
+    </div>
+    <div id="manager_summary" style="margin-bottom:14px;"></div>
+    <div id="approved_groups"></div>
+  </div>
+</div>
+
+<!-- 관리자 인라인 수정 모달 -->
+<div class="modal-bg" id="editModal">
+  <div class="modal-box">
+    <h3>스케줄 수정</h3>
+    <div class="form-group">
+      <label>어린이집 / 유치원</label>
+      <select id="edit_daycare"></select>
+    </div>
+    <div class="form-group">
+      <label>원어민 강사</label>
+      <select id="edit_teacher"></select>
+    </div>
+    <div class="form-group">
+      <label>요일</label>
+      <select id="edit_day">
+        <option value="월요일">월요일</option>
+        <option value="화요일">화요일</option>
+        <option value="수요일">수요일</option>
+        <option value="목요일">목요일</option>
+        <option value="금요일">금요일</option>
+      </select>
+    </div>
+    <div class="container-flex" style="gap:10px;">
+      <div class="form-group" style="flex:1;">
+        <label>시작 시간</label>
+        <input type="time" id="edit_start" step="600">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>종료 시간</label>
+        <input type="time" id="edit_end" step="600">
+      </div>
+    </div>
+    <div class="quick-duration" id="quick_duration_edit"></div>
+    <div class="form-group">
+      <label>참고사항 (선택)</label>
+      <textarea id="edit_memo" rows="2"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeEditModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  let editingId = null;
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("approved");
+    document.getElementById("h_grid").textContent = siteLabel("headings.approved_grid", "주간 출강 스케줄 (승인 완료 기준)");
+    document.getElementById("h_list").textContent = siteLabel("headings.approved_list", "승인 완료 현황 (담당자별)");
+    refreshFormSelectors();
+    renderQuickDurationButtons();
+    populateGridTeacherSelect();
+    renderGrid();
+    renderSummary();
+    renderGroups();
+  }
+
+  function renderQuickDurationButtons() {
+    const presets = [["30분",30],["1시간",60],["1시간30분",90],["2시간",120],["3시간",180]];
+    document.getElementById("quick_duration_edit").innerHTML = presets.map(p =>
+      `<button type="button" class="btn btn-ghost btn-sm" onclick="applyPreset(${p[1]})">+${p[0]}</button>`
+    ).join(" ");
+  }
+  function applyPreset(minutes) {
+    const startEl = document.getElementById("edit_start");
+    const endEl = document.getElementById("edit_end");
+    if (!startEl.value) { alert("시작 시간을 먼저 입력해주세요."); return; }
+    endEl.value = minutesToTime(timeToMinutes(startEl.value) + minutes);
+  }
+
+  function refreshFormSelectors() {
+    const teachers = getTeachers();
+    const daycares = getDaycares();
+    const tOpts = teachers.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+    const dOpts = daycares.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+
+    document.getElementById("edit_teacher").innerHTML = tOpts;
+    document.getElementById("edit_daycare").innerHTML = dOpts;
+  }
+
+  function populateGridTeacherSelect() {
+    const tOpts = getTeachers().map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.status === "퇴사" ? " (퇴사)" : ""}</option>`).join("");
+    document.getElementById("grid_teacher_select").innerHTML = `<option value="">-- 강사를 선택하세요 --</option>` + tOpts;
+  }
+
+  /* ---------- 상태 변경 ---------- */
+  function holdSchedule(id) {
+    if (!confirm("해당 스케줄을 보류(대기 상태로 되돌리기) 처리하시겠습니까? '수업 요청' 페이지의 대기 목록으로 다시 이동합니다.")) return;
+    const schedules = getSchedules();
+    const target = schedules.find(s => s.id === id);
+    if (target) { target.status = "대기"; saveSchedules(schedules); }
+    renderGrid(); renderSummary(); renderGroups(); renderHeadBar("approved");
+  }
+
+  function deleteSchedule(id) {
+    if (!confirm("해당 스케줄을 삭제하시겠습니까?")) return;
+    saveSchedules(getSchedules().filter(s => s.id !== id));
+    renderGrid(); renderSummary(); renderGroups(); renderHeadBar("approved");
+  }
+
+  /* ---------- 인라인 수정 ---------- */
+  function openEditModal(id) {
+    const s = getSchedules().find(x => x.id === id);
+    if (!s) return;
+    editingId = id;
+    document.getElementById("edit_daycare").value = s.daycareId;
+    document.getElementById("edit_teacher").value = s.teacherId;
+    document.getElementById("edit_day").value = s.day;
+    document.getElementById("edit_start").value = s.start;
+    document.getElementById("edit_end").value = s.end;
+    document.getElementById("edit_memo").value = s.memo || "";
+    document.getElementById("editModal").classList.add("open");
+  }
+  function closeEditModal() { editingId = null; document.getElementById("editModal").classList.remove("open"); }
+
+  function withinBounds(startMin, endMin) {
+    return startMin >= timeToMinutes(OPERATING_START) && endMin <= timeToMinutes(OPERATING_END) && endMin > startMin;
+  }
+
+  function saveEdit() {
+    const daycareId = document.getElementById("edit_daycare").value;
+    const teacherId = document.getElementById("edit_teacher").value;
+    const day = document.getElementById("edit_day").value;
+    const start = document.getElementById("edit_start").value;
+    const end = document.getElementById("edit_end").value;
+    const memo = document.getElementById("edit_memo").value.trim();
+
+    const startMin = timeToMinutes(start), endMin = timeToMinutes(end);
+    if (!withinBounds(startMin, endMin)) {
+      alert(`선택하신 시간대가 운영 시간(${OPERATING_START} ~ ${OPERATING_END})을 벗어났거나 종료 시간이 시작 시간보다 빠릅니다.`);
+      return;
+    }
+    const conflict = findScheduleConflict(getSchedules(), [teacherId], daycareId, day, startMin, endMin, editingId);
+    if (conflict) { alert("수정하려는 시간대가 다른 스케줄과 충돌합니다."); return; }
+
+    const schedules = getSchedules();
+    const target = schedules.find(s => s.id === editingId);
+    const teacher = getTeachers().find(t => t.id === teacherId);
+    const daycare = getDaycares().find(d => d.id === daycareId);
+    Object.assign(target, {
+      daycareId, daycareName: daycare.name,
+      teacherId, teacherName: teacher.name,
+      day, start, end, memo
+    });
+    saveSchedules(schedules);
+    closeEditModal();
+    renderGrid(); renderSummary(); renderGroups();
+  }
+
+  /* ---------- 담당자별 요약 ---------- */
+  function renderSummary() {
+    const approved = getSchedules().filter(s => s.status === "승인");
+    const groups = groupSchedulesByManager(approved);
+    const holder = document.getElementById("manager_summary");
+    const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+    if (keys.length === 0) {
+      holder.innerHTML = `<p class="small-muted">승인된 스케줄이 없습니다.</p>`;
+      return;
+    }
+    holder.innerHTML = `<div class="mgr-chip-wrap">` + keys.map(k =>
+      `<a href="#mgr_${encodeURIComponent(k)}" class="mgr-chip">${escapeHtml(k)} <span class="badge">${groups[k].length}</span></a>`
+    ).join("") + `</div>`;
+  }
+
+  /* ---------- 담당자별 그룹 목록 (검색 포함) ---------- */
+  function renderGroups() {
+    const query = document.getElementById("search_box") ? document.getElementById("search_box").value : "";
+    let approved = [...getSchedules()].filter(s => s.status === "승인").sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start));
+    const daycareMgr = {};
+    getDaycares().forEach(d => daycareMgr[d.id] = getManagerName(d.managerId));
+    approved = approved.filter(s => matchesQuery(
+      [s.daycareName, s.teacherName, s.requesterName, s.day, daycareMgr[s.daycareId], s.memo], query
+    ));
+
+    const groups = groupSchedulesByManager(approved);
+    const holder = document.getElementById("approved_groups");
+    const keys = Object.keys(groups).sort();
+
+    if (keys.length === 0) {
+      holder.innerHTML = `<p class="small-muted">${query ? "검색 결과가 없습니다." : "승인된 스케줄이 없습니다."}</p>`;
+      return;
+    }
+
+    holder.innerHTML = keys.map(mgr => {
+      const rows = groups[mgr];
+      return `
+        <details class="mgr-group" open id="mgr_${encodeURIComponent(mgr)}">
+          <summary>담당자: ${escapeHtml(mgr)} <span class="badge">${rows.length}</span></summary>
+          <table class="data-table" style="margin-top:10px;">
+            <thead>
+              <tr>
+                <th>요청자</th><th>어린이집 / 기관</th><th>배정 강사</th><th>일정</th><th>참고사항</th><th style="width:210px;">관리</th>
+              </tr>
+            </thead>
+            <tbody>${rows.map(rowHtml).join("")}</tbody>
+          </table>
+        </details>
+      `;
+    }).join("");
+  }
+
+  function rowHtml(s) {
+    const isAdmin = me.role === "admin";
+    const isOwner = s.requesterId === me.id;
+    let actionBtns;
+    if (isAdmin) {
+      actionBtns = `
+        <button onclick="holdSchedule('${s.id}')" class="btn btn-warn">보류</button>
+        <button onclick="openEditModal('${s.id}')" class="btn btn-ghost btn-sm">수정</button>
+        <button onclick="deleteSchedule('${s.id}')" class="btn btn-danger">삭제</button>
+      `;
+    } else if (isOwner) {
+      actionBtns = `<span class="status-approved">승인됨</span>`;
+    } else {
+      actionBtns = "-";
+    }
+    return `
+      <tr>
+        <td>${escapeHtml(s.requesterName)}</td>
+        <td>${escapeHtml(s.daycareName)}</td>
+        <td><b>${escapeHtml(s.teacherName)}</b></td>
+        <td>${s.day} (${s.start}~${s.end}, ${fmtDuration(timeToMinutes(s.start), timeToMinutes(s.end))})</td>
+        <td style="text-align:left; max-width:220px; white-space:pre-wrap;">${escapeHtml(s.memo || "-")}</td>
+        <td>${actionBtns}</td>
+      </tr>
+    `;
+  }
+
+  function renderGrid() {
+    const teacherId = document.getElementById("grid_teacher_select").value;
+    renderTeacherGrid(teacherId, document.getElementById("grid_holder"), document.getElementById("hour_chip"));
+  }
+
+  init();
+</script>
+</body>
+</html>

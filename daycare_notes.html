@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>어린이집 메모 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <a href="daycares.html" class="back-link">← 어린이집 리스트로 돌아가기</a>
+    <h3 id="dc_title">기관 메모</h3>
+    <p class="small-muted" id="dc_manager_line" style="margin-bottom:14px;"></p>
+
+    <div class="form-group">
+      <label>새 메모 작성</label>
+      <textarea id="note_text" rows="3" placeholder="이 어린이집과 관련된 특이사항, 주의사항, 연락 내역 등을 자유롭게 남겨주세요."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="addNote()">메모 등록</button>
+
+    <div id="note_list" style="margin-top:20px;"></div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  const params = new URLSearchParams(location.search);
+  const dcId = params.get("id");
+  let daycare = null;
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("daycares");
+    daycare = getDaycares().find(d => d.id === dcId);
+    if (!daycare) {
+      document.getElementById("dc_title").textContent = "기관을 찾을 수 없습니다.";
+      document.getElementById("note_text").disabled = true;
+      return;
+    }
+    document.getElementById("dc_title").textContent = daycare.name + " — 메모 게시판";
+    document.getElementById("dc_manager_line").textContent = "담당자: " + getManagerName(daycare.managerId);
+    renderNotes();
+  }
+
+  function addNote() {
+    const text = document.getElementById("note_text").value.trim();
+    if (!text) { alert("메모 내용을 입력해 주세요."); return; }
+    const notes = getNotes();
+    if (!notes[dcId]) notes[dcId] = [];
+    notes[dcId].push({ author: me.name, text, date: new Date().toISOString() });
+    saveNotes(notes);
+    document.getElementById("note_text").value = "";
+    renderNotes();
+  }
+
+  function deleteNote(idx) {
+    if (!confirm("해당 메모를 삭제하시겠습니까?")) return;
+    const notes = getNotes();
+    notes[dcId].splice(idx, 1);
+    saveNotes(notes);
+    renderNotes();
+  }
+
+  function renderNotes() {
+    const notes = getNotes()[dcId] || [];
+    const holder = document.getElementById("note_list");
+    if (notes.length === 0) {
+      holder.innerHTML = `<p class="small-muted">등록된 메모가 없습니다. 첫 메모를 남겨보세요.</p>`;
+      return;
+    }
+    const sorted = [...notes].map((n, i) => ({ ...n, _idx: i })).sort((a, b) => (a.date < b.date ? 1 : -1));
+    holder.innerHTML = sorted.map(n => `
+      <div class="note-item">
+        <div class="note-head">
+          <span><span class="note-author">${escapeHtml(n.author)}</span> · ${fmtDate(n.date)}</span>
+          ${(me.role === "admin" || n.author === me.name) ? `<a href="#" onclick="deleteNote(${n._idx}); return false;" style="color:#ef4444;">삭제</a>` : ""}
+        </div>
+        <div class="note-text">${escapeHtml(n.text)}</div>
+      </div>
+    `).join("");
+  }
+
+  init();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그인 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-tit">
+        <h1 id="lg_title"></h1>
+        <p id="lg_subtitle"></p>
+      </div>
+
+      <div class="auth-hint" id="lg_hint"></div>
+
+      <form onsubmit="return false;">
+        <div class="form_item">
+          <label for="role">로그인 유형</label>
+          <select id="role">
+            <option value="user">사원 (수업 요청)</option>
+            <option value="admin">관리자 (Admin)</option>
+            <option value="teacher">Teacher (내 스케줄 · 휴가 신청)</option>
+          </select>
+        </div>
+        <div class="form_item">
+          <label for="loginName">이름</label>
+          <input type="text" id="loginName" placeholder="가입 시 등록한 이름" autocomplete="username">
+        </div>
+        <div class="form_item">
+          <label for="loginPw">비밀번호</label>
+          <input type="password" id="loginPw" placeholder="비밀번호를 입력하세요" autocomplete="current-password">
+        </div>
+        <div class="form_error" id="err"></div>
+        <button type="button" class="btn_submit" onclick="checkLogin()">로그인</button>
+      </form>
+      <div class="auth-foot">
+        아직 계정이 없으신가요? <a href="signUp.html">회원가입</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  document.getElementById("lg_title").textContent = siteLabel("login.title", DEFAULT_SITE_SETTINGS.login.title);
+  document.getElementById("lg_subtitle").textContent = siteLabel("login.subtitle", DEFAULT_SITE_SETTINGS.login.subtitle);
+  document.getElementById("lg_hint").innerHTML = escapeHtml(siteLabel("login.hint", DEFAULT_SITE_SETTINGS.login.hint)).replace(/\n/g, "<br>");
+
+  // 이미 로그인 되어 있으면 바로 이동
+  (function () {
+    const uid = sessionStorage.getItem("userId");
+    if (!uid) return;
+    const u = getUsers().find(x => x.id === uid);
+    if (u && !u.deleted) location.href = (u.role === "teacher") ? "teacher_portal.html" : "registration.html";
+    else sessionStorage.clear();
+  })();
+
+  function checkLogin() {
+    const name = document.getElementById("loginName").value.trim();
+    const pw = document.getElementById("loginPw").value;
+    const role = document.getElementById("role").value;
+    const errEl = document.getElementById("err");
+    errEl.textContent = "";
+
+    if (!name || !pw) { errEl.textContent = "이름과 비밀번호를 모두 입력해주세요."; return; }
+
+    const matches = getUsers().filter(u => u.name === name && !u.deleted);
+
+    if (matches.length === 0) {
+      errEl.textContent = "일치하는 계정을 찾을 수 없습니다. 이름 또는 비밀번호를 확인해주세요.";
+      return;
+    }
+    if (matches.length > 1) {
+      // 동명이인이 있는 경우: 유형+비밀번호까지 맞는 계정으로 좁힘
+      const narrowed = matches.filter(u => u.role === role && u.pw === pw);
+      if (narrowed.length === 1) { doLogin(narrowed[0]); return; }
+      errEl.textContent = "동일한 이름의 계정이 여러 개 있습니다. 관리자에게 문의해주세요.";
+      return;
+    }
+
+    const user = matches[0];
+    if (user.pw !== pw) { errEl.textContent = "이름 또는 비밀번호가 일치하지 않습니다."; return; }
+    if (user.role !== role) {
+      const roleLabel = { admin: "관리자", user: "사원", teacher: "Teacher" };
+      errEl.textContent = `[${name}] 계정은 '${roleLabel[role] || role}' 유형이 아닙니다. 로그인 유형을 확인해주세요.`;
+      return;
+    }
+    doLogin(user);
+  }
+
+  function doLogin(user) {
+    sessionStorage.setItem("userId", user.id);
+    location.href = (user.role === "teacher") ? "teacher_portal.html" : "registration.html";
+  }
+
+  document.getElementById("loginPw").addEventListener("keydown", e => { if (e.key === "Enter") checkLogin(); });
+</script>
+</body>
+</html>

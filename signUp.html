@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원가입 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-tit">
+        <h1 id="su_title"></h1>
+        <p id="su_subtitle"></p>
+      </div>
+
+      <div class="form_item">
+        <label for="s_role">가입 유형</label>
+        <select id="s_role" onchange="onRoleChange()">
+          <option value="user">사원</option>
+          <option value="teacher">Teacher</option>
+        </select>
+      </div>
+
+      <div class="form_item">
+        <label for="s_name">이름</label>
+        <input type="text" id="s_name" placeholder="이름 입력 (로그인 시 사용)">
+      </div>
+
+      <div id="teacher_link_box" style="display:none;">
+        <div class="form_item">
+          <label for="s_teacher_pick">본인 강사 프로필 선택</label>
+          <select id="s_teacher_pick">
+            <option value="">-- 목록에 없음 (새로 등록) --</option>
+          </select>
+        </div>
+        <p class="small-muted" style="margin:-8px 0 14px;">이름이 이미 강사 리스트에 등록되어 있다면 선택해주세요. 목록에 없으면 새 강사 프로필이 자동으로 생성되고, 이후 관리자가 세부정보(연락처, 비자 등)를 보완할 수 있습니다.</p>
+      </div>
+
+      <div class="form_item">
+        <label for="s_pw">비밀번호</label>
+        <input type="password" id="s_pw" placeholder="비밀번호 입력" autocomplete="new-password">
+      </div>
+      <div class="form_item">
+        <label for="s_pw2">비밀번호 확인</label>
+        <input type="password" id="s_pw2" placeholder="비밀번호 재입력" autocomplete="new-password">
+      </div>
+      <div class="form_error" id="err"></div>
+      <button type="button" class="btn_submit" onclick="registerAccount()">회원가입 완료</button>
+      <div class="auth-foot">
+        이미 계정이 있으신가요? <a href="index.html">로그인</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  document.getElementById("su_title").textContent = siteLabel("signup.title", DEFAULT_SITE_SETTINGS.signup.title);
+  document.getElementById("su_subtitle").textContent = siteLabel("signup.subtitle", DEFAULT_SITE_SETTINGS.signup.subtitle);
+
+  function onRoleChange() {
+    const isTeacher = document.getElementById("s_role").value === "teacher";
+    document.getElementById("teacher_link_box").style.display = isTeacher ? "block" : "none";
+    if (isTeacher) {
+      const opts = getTeachers()
+        .filter(t => !findUserByTeacherId(t.id))
+        .map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+      document.getElementById("s_teacher_pick").innerHTML = `<option value="">-- 목록에 없음 (새로 등록) --</option>` + opts;
+    }
+  }
+
+  function registerAccount() {
+    const role = document.getElementById("s_role").value;
+    const name = document.getElementById("s_name").value.trim();
+    const pw = document.getElementById("s_pw").value;
+    const pw2 = document.getElementById("s_pw2").value;
+    const errEl = document.getElementById("err");
+    errEl.textContent = "";
+
+    if (!name || !pw || !pw2) { errEl.textContent = "모든 항목을 입력해주세요."; return; }
+    if (pw !== pw2) { errEl.textContent = "비밀번호가 일치하지 않습니다."; return; }
+    if (pw.length < 4) { errEl.textContent = "비밀번호는 4자 이상 입력해주세요."; return; }
+
+    const loginId = makeUniqueId(name);
+
+    if (role === "teacher") {
+      let teacherId = document.getElementById("s_teacher_pick").value;
+      if (!teacherId) {
+        const teachers = getTeachers();
+        const nt = { id: uid("t"), name, location: "", phone: "", visa: "", photo: "", hireDate: "", resignDate: "", status: "재직" };
+        teachers.push(nt);
+        saveTeachers(teachers);
+        teacherId = nt.id;
+      }
+      const ok = setTeacherLogin(teacherId, loginId, pw, name);
+      if (!ok) { errEl.textContent = "가입 처리 중 문제가 발생했습니다. 다시 시도해주세요."; return; }
+    } else {
+      const users = getUsers();
+      users.push({ id: loginId, pw, name, role: "user", createdAt: new Date().toISOString() });
+      saveUsers(users);
+    }
+
+    alert("[" + name + "] 님의 회원가입이 완료되었습니다. 로그인해주세요.");
+    location.href = "index.html";
+  }
+
+  onRoleChange();
+</script>
+</body>
+</html>

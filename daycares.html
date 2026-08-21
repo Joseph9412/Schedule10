@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>어린이집 리스트 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3 id="h_title"></h3>
+
+    <div class="container-flex" style="gap:10px; align-items:flex-end;">
+      <div class="form-group" style="flex:2; min-width:200px;">
+        <label>기관명 (지역명_기관명)</label>
+        <input type="text" id="new_dc_name" placeholder="예: 서초구_반포어린이집">
+      </div>
+      <div class="form-group" style="flex:1; min-width:150px;">
+        <label>담당자</label>
+        <select id="new_dc_manager"><option value="">-- 미지정 --</option></select>
+      </div>
+    </div>
+    <div class="container-flex" style="gap:10px; align-items:flex-end;">
+      <div class="form-group" style="width:130px;">
+        <label>요일 (선택)</label>
+        <select id="new_dc_day">
+          <option value="">-- 없음 --</option>
+          <option value="월요일">월요일</option><option value="화요일">화요일</option><option value="수요일">수요일</option>
+          <option value="목요일">목요일</option><option value="금요일">금요일</option>
+        </select>
+      </div>
+      <div class="form-group" style="width:130px;">
+        <label>시작 시간</label>
+        <input type="time" id="new_dc_start" step="600" value="10:00">
+      </div>
+      <div class="form-group" style="width:110px;">
+        <label>타임수 (1타임=30분)</label>
+        <input type="number" id="new_dc_sessions" min="1" value="2">
+      </div>
+      <button class="btn btn-primary" style="height:36px; margin-bottom:12px;" onclick="addDaycare()">기관 추가</button>
+    </div>
+    <p class="small-muted" style="margin:-8px 0 14px;">요일을 선택하면 정기 수업시간이 함께 등록됩니다. 추가로 필요하면 카드의 "수정"에서 더 등록할 수 있고, 이 정보는 수업 요청 시 자동으로 채워집니다.</p>
+
+    <div class="bulk-paste-box">
+      <label style="font-weight:700; font-size:13px; display:block; margin-bottom:6px;">📋 엑셀에서 여러 기관 한번에 붙여넣기 (지역_기관명 [Tab] 담당자 [Tab] 요일(선택) [Tab] 시작시간(선택) [Tab] 타임수(선택, 1타임=30분))</label>
+      <textarea id="bulk_text" placeholder="강남구_개포유치원	엄준우	월요일	10:00	2&#10;서초구_반포어린이집	권태호"></textarea>
+      <div class="bp-actions">
+        <span class="small-muted">담당자명은 목록에 없으면 자동으로 새 담당자로 등록됩니다. 요일/시간/타임수는 정기 수업시간으로 등록됩니다.</span>
+        <button class="btn btn-primary btn-sm" onclick="bulkAddDaycares()">일괄 등록</button>
+      </div>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="search_box" placeholder="기관명, 담당자, 지역으로 검색..." oninput="renderList()">
+    </div>
+    <div class="container-flex" style="justify-content:flex-end; margin-bottom:10px;" id="bulk_delete_bar_wrap">
+      <div id="bulk_delete_bar" style="display:none; gap:6px;" class="container-flex">
+        <label class="small-muted" style="display:flex; align-items:center; gap:4px;">
+          <input type="checkbox" id="select_all_dc" onchange="toggleSelectAllDaycares()"> 전체선택
+        </label>
+        <button class="btn btn-danger btn-sm" onclick="bulkDeleteDaycares()">선택 삭제 (<span id="sel_count_dc">0</span>)</button>
+      </div>
+    </div>
+
+    <div id="dc_groups"></div>
+    <p class="small-muted" style="margin-top:10px;">기관명을 클릭하면 해당 어린이집에 대한 메모 게시판으로 이동합니다.</p>
+  </div>
+</div>
+
+<!-- 담당자/정기수업시간 수정 모달 -->
+<div class="modal-bg" id="editModal">
+  <div class="modal-box">
+    <h3>기관 정보 수정</h3>
+    <div class="form-group"><label>기관명</label><input id="ed_name"></div>
+    <div class="form-group">
+      <label>담당자</label>
+      <select id="ed_manager"><option value="">-- 미지정 --</option></select>
+    </div>
+    <div class="form-group">
+      <label>정기 수업시간</label>
+      <div id="ed_sched_list" style="margin-bottom:8px;"></div>
+      <div class="container-flex" style="gap:6px;">
+        <select id="ed_sched_day" style="flex:1;">
+          <option value="월요일">월요일</option><option value="화요일">화요일</option><option value="수요일">수요일</option>
+          <option value="목요일">목요일</option><option value="금요일">금요일</option>
+        </select>
+        <input type="time" id="ed_sched_start" step="600" value="10:00" style="flex:1;">
+        <input type="number" id="ed_sched_sessions" min="1" value="2" style="flex:1;" title="타임수 (1타임=30분)">
+        <button class="btn btn-ghost btn-sm" onclick="addDefaultSchedule()">+ 추가</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeEditModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireStaff();
+  let editingId = null;
+
+  let selectedDaycareIds = new Set();
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("daycares");
+    document.getElementById("h_title").textContent = siteLabel("headings.daycares_list", "어린이집 / 유치원 리스트") + " (누구나 추가·삭제 가능)";
+    document.getElementById("bulk_delete_bar").style.display = "flex";
+    refreshManagerSelects();
+    renderList();
+  }
+
+  function toggleDaycareSelect(id) {
+    if (selectedDaycareIds.has(id)) selectedDaycareIds.delete(id); else selectedDaycareIds.add(id);
+    document.getElementById("sel_count_dc").textContent = selectedDaycareIds.size;
+  }
+  function toggleSelectAllDaycares() {
+    const checked = document.getElementById("select_all_dc").checked;
+    const cbs = document.querySelectorAll(".dc-select-cb");
+    selectedDaycareIds = new Set();
+    cbs.forEach(cb => { cb.checked = checked; if (checked) selectedDaycareIds.add(cb.dataset.id); });
+    document.getElementById("sel_count_dc").textContent = selectedDaycareIds.size;
+  }
+  function bulkDeleteDaycares() {
+    if (selectedDaycareIds.size === 0) { alert("삭제할 기관을 선택해주세요."); return; }
+    if (!confirm(`선택한 ${selectedDaycareIds.size}개 기관을 삭제하시겠습니까? 관련 메모도 함께 삭제됩니다.`)) return;
+    saveDaycares(getDaycares().filter(d => !selectedDaycareIds.has(d.id)));
+    const notes = getNotes();
+    selectedDaycareIds.forEach(id => delete notes[id]);
+    saveNotes(notes);
+    selectedDaycareIds = new Set();
+    document.getElementById("select_all_dc").checked = false;
+    renderList();
+  }
+
+  function refreshManagerSelects() {
+    const mOpts = getManagers().map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join("");
+    document.getElementById("new_dc_manager").innerHTML = `<option value="">-- 미지정 --</option>` + mOpts;
+    document.getElementById("ed_manager").innerHTML = `<option value="">-- 미지정 --</option>` + mOpts;
+  }
+
+  function addDaycare() {
+    const nameInput = document.getElementById("new_dc_name");
+    const mgrSelect = document.getElementById("new_dc_manager");
+    const name = nameInput.value.trim();
+    if (!name) { alert("기관명을 입력해 주세요."); return; }
+
+    const day = document.getElementById("new_dc_day").value;
+    const start = document.getElementById("new_dc_start").value;
+    const sessions = parseInt(document.getElementById("new_dc_sessions").value, 10) || 1;
+    const defaultSchedules = day ? [{ day, start, sessions }] : [];
+
+    const list = getDaycares();
+    list.push({ id: uid("d"), name, managerId: mgrSelect.value, defaultSchedules });
+    saveDaycares(list);
+    nameInput.value = ""; mgrSelect.value = ""; document.getElementById("new_dc_day").value = "";
+    renderList();
+  }
+
+  function bulkAddDaycares() {
+    const text = document.getElementById("bulk_text").value;
+    const rows = parseBulkRows(text);
+    if (rows.length === 0) { alert("붙여넣은 내용이 없습니다."); return; }
+    const daycares = getDaycares();
+    const managers = getManagers();
+    let count = 0;
+    rows.forEach(cols => {
+      const name = (cols[0] || "").trim();
+      if (!name) return;
+      const mgrName = (cols[1] || "").trim();
+      let managerId = "";
+      if (mgrName) {
+        let m = managers.find(mm => mm.name === mgrName);
+        if (!m) { m = { id: uid("m"), name: mgrName, phone: "", memo: "", createdAt: new Date().toISOString() }; managers.push(m); }
+        managerId = m.id;
+      }
+      const day = (cols[2] || "").trim();
+      const start = (cols[3] || "").trim();
+      const sessions = parseInt(cols[4], 10) || 1;
+      const defaultSchedules = (day && start && DAYS.includes(day)) ? [{ day, start, sessions }] : [];
+      daycares.push({ id: uid("d"), name, managerId, defaultSchedules });
+      count++;
+    });
+    saveManagers(managers);
+    saveDaycares(daycares);
+    document.getElementById("bulk_text").value = "";
+    refreshManagerSelects();
+    renderList();
+    alert(`${count}개 기관이 일괄 등록되었습니다.`);
+  }
+
+  function deleteDaycare(id) {
+    if (!confirm("해당 기관을 삭제하시겠습니까? 관련 메모도 함께 삭제됩니다.")) return;
+    saveDaycares(getDaycares().filter(d => d.id !== id));
+    const notes = getNotes();
+    delete notes[id];
+    saveNotes(notes);
+    renderList();
+  }
+
+  function openEditModal(id) {
+    const d = getDaycares().find(x => x.id === id);
+    if (!d) return;
+    editingId = id;
+    document.getElementById("ed_name").value = d.name;
+    document.getElementById("ed_manager").value = d.managerId || "";
+    renderEdSchedList();
+    document.getElementById("editModal").classList.add("open");
+  }
+  function closeEditModal() { editingId = null; document.getElementById("editModal").classList.remove("open"); }
+
+  function renderEdSchedList() {
+    const d = getDaycares().find(x => x.id === editingId);
+    const holder = document.getElementById("ed_sched_list");
+    if (!d.defaultSchedules || d.defaultSchedules.length === 0) {
+      holder.innerHTML = `<p class="small-muted">등록된 정기 수업시간이 없습니다.</p>`;
+      return;
+    }
+    holder.innerHTML = d.defaultSchedules.map((s, idx) =>
+      `<span class="default-sched-chip">${defaultSchedLabel(s)} <span class="x" onclick="removeDefaultSchedule(${idx})">×</span></span>`
+    ).join("");
+  }
+  function addDefaultSchedule() {
+    const d = getDaycares().find(x => x.id === editingId);
+    const day = document.getElementById("ed_sched_day").value;
+    const start = document.getElementById("ed_sched_start").value;
+    const sessions = parseInt(document.getElementById("ed_sched_sessions").value, 10) || 1;
+    if (!start || sessions < 1) { alert("시간과 타임수를 올바르게 입력해주세요."); return; }
+    d.defaultSchedules = d.defaultSchedules || [];
+    d.defaultSchedules.push({ day, start, sessions });
+    saveDaycares(getDaycares().map(x => x.id === d.id ? d : x));
+    renderEdSchedList();
+  }
+  function removeDefaultSchedule(idx) {
+    const d = getDaycares().find(x => x.id === editingId);
+    d.defaultSchedules.splice(idx, 1);
+    saveDaycares(getDaycares().map(x => x.id === d.id ? d : x));
+    renderEdSchedList();
+  }
+
+  function saveEdit() {
+    const list = getDaycares();
+    const d = list.find(x => x.id === editingId);
+    const name = document.getElementById("ed_name").value.trim();
+    if (!name) { alert("기관명을 입력해주세요."); return; }
+    d.name = name;
+    d.managerId = document.getElementById("ed_manager").value;
+    saveDaycares(list);
+    closeEditModal();
+    renderList();
+  }
+
+  /* ---------- 목록: 구역(지역) > 담당자 2단 그룹 + 검색 ---------- */
+  function renderList() {
+    const query = document.getElementById("search_box").value;
+    let list = getDaycares();
+    list = list.filter(d => matchesQuery([d.name, getManagerName(d.managerId), parseRegion(d.name)], query));
+
+    const holder = document.getElementById("dc_groups");
+    if (list.length === 0) {
+      holder.innerHTML = `<p class="small-muted">${query ? "검색 결과가 없습니다." : "등록된 기관이 없습니다."}</p>`;
+      return;
+    }
+
+    const byRegion = {};
+    list.forEach(d => {
+      const region = parseRegion(d.name);
+      if (!byRegion[region]) byRegion[region] = [];
+      byRegion[region].push(d);
+    });
+
+    const regions = Object.keys(byRegion).sort();
+    holder.innerHTML = regions.map(region => {
+      const items = byRegion[region];
+      const byMgr = {};
+      items.forEach(d => {
+        const mgr = getManagerName(d.managerId);
+        if (!byMgr[mgr]) byMgr[mgr] = [];
+        byMgr[mgr].push(d);
+      });
+      const mgrKeys = Object.keys(byMgr).sort();
+      const mgrHtml = mgrKeys.map(mgr => `
+        <details class="region-sub-mgr" open>
+          <summary>담당자: ${escapeHtml(mgr)} <span class="badge">${byMgr[mgr].length}</span></summary>
+          <div class="dc-list" style="margin-top:8px;">${byMgr[mgr].map(dcCardHtml).join("")}</div>
+        </details>
+      `).join("");
+      return `
+        <details class="region-group" open>
+          <summary>📍 ${escapeHtml(region)} <span class="badge">${items.length}</span></summary>
+          ${mgrHtml}
+        </details>
+      `;
+    }).join("");
+  }
+
+  function dcCardHtml(d) {
+    const schedChips = (d.defaultSchedules || []).map(s => `<span class="default-sched-chip">${defaultSchedLabel(s)}</span>`).join("");
+    const selectCb = `<input type="checkbox" class="dc-select-cb" data-id="${d.id}" onclick="toggleDaycareSelect('${d.id}')" style="margin-right:10px;">`;
+    return `
+      <div class="dc-row">
+        <div style="display:flex; align-items:flex-start;">
+          ${selectCb}
+          <div>
+            <a class="dc-name" href="daycare_notes.html?id=${encodeURIComponent(d.id)}">${escapeHtml(d.name)}</a>
+            <span class="dc-manager">담당자: ${escapeHtml(getManagerName(d.managerId))}</span>
+            <div style="margin-top:6px;">${schedChips}</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-ghost btn-sm" onclick="openEditModal('${d.id}')">수정</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteDaycare('${d.id}')">삭제</button>
+        </div>
+      </div>
+    `;
+  }
+
+  init();
+</script>
+</body>
+</html>

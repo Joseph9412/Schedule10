@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>환경설정 - 원어민 강사 출강 관리</title>
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<div id="page-wrap">
+  <div id="head_bar_root"></div>
+
+  <div class="panel">
+    <h3>환경설정 (관리자 전용)</h3>
+    <p class="small-muted" style="margin-bottom:16px;">시스템 제목, 상단 탭 이름, 로그인/회원가입 화면 문구, 각 페이지의 제목 문구를 직접 수정할 수 있습니다. 저장하면 모든 사용자 화면에 바로 반영됩니다.</p>
+
+    <div class="settings-section">
+      <h4>시스템 타이틀</h4>
+      <div class="form-group"><input id="s_site_title"></div>
+    </div>
+
+    <div class="settings-section">
+      <h4>상단 탭 이름</h4>
+      <div class="settings-grid" id="tabs_grid"></div>
+    </div>
+
+    <div class="settings-section">
+      <h4>페이지별 제목 문구</h4>
+      <div class="settings-grid" id="headings_grid"></div>
+    </div>
+
+    <div class="settings-section">
+      <h4>로그인 화면 문구</h4>
+      <div class="form-group"><label>제목</label><input id="login_title"></div>
+      <div class="form-group"><label>부제목</label><input id="login_subtitle"></div>
+      <div class="form-group"><label>안내 힌트</label><input id="login_hint"></div>
+    </div>
+
+    <div class="settings-section">
+      <h4>회원가입 화면 문구</h4>
+      <div class="form-group"><label>제목</label><input id="signup_title"></div>
+      <div class="form-group"><label>부제목</label><input id="signup_subtitle"></div>
+    </div>
+
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="saveAll()">저장</button>
+      <button class="btn btn-ghost" onclick="resetDefaults()">기본값으로 초기화</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const me = requireAdmin();
+
+  const TAB_KEYS = [
+    ["registration", "수업 요청 탭"], ["approved", "승인 현황 탭"], ["availability", "보강/대체 탭"],
+    ["teachers", "강사 리스트 탭"], ["calendar", "강사 일정관리 탭"], ["daycares", "어린이집 리스트 탭"],
+    ["managers", "담당자 탭"], ["users", "가입 회원 확인 탭"], ["bulkimport", "통합 데이터 등록 탭"],
+    ["settings", "환경설정 탭"], ["portal", "강사 포털 탭"]
+  ];
+  const HEADING_KEYS = [
+    ["registration_form", "수업 요청 폼 제목"], ["registration_list", "수업 요청 목록 제목"],
+    ["approved_grid", "승인 현황 - 그리드 제목"], ["approved_list", "승인 현황 - 목록 제목"],
+    ["teachers_list", "강사 리스트 제목"], ["daycares_list", "어린이집 리스트 제목"], ["managers_list", "담당자 리스트 제목"],
+    ["availability_title", "보강/대체 페이지 제목"], ["calendar_title", "강사 일정관리 페이지 제목"],
+    ["portal_title", "강사 포털 페이지 제목"], ["bulkimport_title", "통합 데이터 등록 페이지 제목"]
+  ];
+
+  function init() {
+    if (!me) return;
+    renderHeadBar("settings");
+    const s = getSiteSettings();
+    document.getElementById("s_site_title").value = s.siteTitle;
+    document.getElementById("tabs_grid").innerHTML = TAB_KEYS.map(([k, label]) => `
+      <div class="form-group"><label>${label}</label><input id="tab_${k}" value="${escapeHtml(s.tabs[k] || "")}"></div>
+    `).join("");
+    document.getElementById("headings_grid").innerHTML = HEADING_KEYS.map(([k, label]) => `
+      <div class="form-group"><label>${label}</label><input id="head_${k}" value="${escapeHtml(s.headings[k] || "")}"></div>
+    `).join("");
+    document.getElementById("login_title").value = s.login.title;
+    document.getElementById("login_subtitle").value = s.login.subtitle;
+    document.getElementById("login_hint").value = s.login.hint;
+    document.getElementById("signup_title").value = s.signup.title;
+    document.getElementById("signup_subtitle").value = s.signup.subtitle;
+  }
+
+  function saveAll() {
+    const s = getSiteSettings();
+    s.siteTitle = document.getElementById("s_site_title").value.trim() || DEFAULT_SITE_SETTINGS.siteTitle;
+    TAB_KEYS.forEach(([k]) => { s.tabs[k] = document.getElementById(`tab_${k}`).value.trim() || DEFAULT_SITE_SETTINGS.tabs[k]; });
+    HEADING_KEYS.forEach(([k]) => { s.headings[k] = document.getElementById(`head_${k}`).value.trim() || DEFAULT_SITE_SETTINGS.headings[k]; });
+    s.login.title = document.getElementById("login_title").value.trim() || DEFAULT_SITE_SETTINGS.login.title;
+    s.login.subtitle = document.getElementById("login_subtitle").value.trim() || DEFAULT_SITE_SETTINGS.login.subtitle;
+    s.login.hint = document.getElementById("login_hint").value.trim() || DEFAULT_SITE_SETTINGS.login.hint;
+    s.signup.title = document.getElementById("signup_title").value.trim() || DEFAULT_SITE_SETTINGS.signup.title;
+    s.signup.subtitle = document.getElementById("signup_subtitle").value.trim() || DEFAULT_SITE_SETTINGS.signup.subtitle;
+    saveSiteSettings(s);
+    renderHeadBar("settings");
+    alert("저장되었습니다. 다른 페이지 이동 시 바로 반영됩니다.");
+  }
+
+  function resetDefaults() {
+    if (!confirm("모든 문구를 기본값으로 되돌리시겠습니까?")) return;
+    saveSiteSettings(JSON.parse(JSON.stringify(DEFAULT_SITE_SETTINGS)));
+    init();
+    renderHeadBar("settings");
+    alert("기본값으로 초기화되었습니다.");
+  }
+
+  init();
+</script>
+</body>
+</html>
